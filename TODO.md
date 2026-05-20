@@ -152,3 +152,4 @@ Before the next release/submission, the plugin and MCP implementation must be al
 - Create plugins: https://code.claude.com/docs/en/plugins
 - Plugin marketplaces: https://code.claude.com/docs/en/plugin-marketplaces
 - Plugins reference: https://code.claude.com/docs/en/plugins-reference
+- Plugin directory submission shortcut: https://clau.de/plugin-directory-submission (redirects to the official submission section in Claude docs)
