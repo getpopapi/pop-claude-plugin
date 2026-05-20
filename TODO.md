@@ -117,6 +117,29 @@ chmod +x bin/pop-mcp-server.js
 
 Then rerun all validation commands above and commit the updated bundle.
 
+## Mandatory Pre-Release Updates (Not Yet Applied)
+
+Before the next release/submission, the plugin and MCP implementation must be aligned with the latest POP API changes:
+
+1. Update integration identifiers everywhere they are referenced.
+   Current legacy values:
+   - `sdi-via-pop`
+   - `peppol-via-pop`
+   - `pop-to-webhook`
+   - `fatture-in-cloud`
+   
+   Required values:
+   - `sdi`
+   - `peppol`
+   - `webhook`
+   - `fatture-in-cloud` (unchanged)
+
+2. Update all `/sdi-via-pop/` endpoint paths to `/sdi/`.
+   This includes constants, tool handlers, docs/examples, and any validation/inspection checks that rely on old endpoint names.
+
+3. Add full Poland / KSeF support that was recently introduced.
+   Include API coverage, MCP tools/schemas, docs, validation flow, and release-readiness test coverage for KSeF-related operations.
+
 ## Known Notes / Risks
 
 - `@getpopapi/pop-mcp-server` was not published to npm at the time this plugin was packaged, so the plugin currently ships a bundled `bin/pop-mcp-server.js`.
@@ -129,4 +152,3 @@ Then rerun all validation commands above and commit the updated bundle.
 - Create plugins: https://code.claude.com/docs/en/plugins
 - Plugin marketplaces: https://code.claude.com/docs/en/plugin-marketplaces
 - Plugins reference: https://code.claude.com/docs/en/plugins-reference
-
