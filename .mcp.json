@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "pop": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/pop-mcp-server.js"
+      ],
+      "env": {
+        "POP_API_KEY": "${user_config.pop_api_key}",
+        "POP_ENVIRONMENT": "${user_config.pop_environment}"
+      }
+    }
+  }
+}
+

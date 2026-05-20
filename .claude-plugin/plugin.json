@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "pop",
+  "displayName": "POP",
+  "version": "1.0.0",
+  "description": "Create, validate, submit, retrieve, and preserve Italian SdI/FatturaPA, Peppol, and PDF invoices through the POP Cloud API.",
+  "author": {
+    "name": "POP"
+  },
+  "homepage": "https://popapi.io",
+  "license": "MIT",
+  "keywords": [
+    "invoicing",
+    "fatturapa",
+    "sdi",
+    "peppol",
+    "italy",
+    "pdf",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "pop_api_key": {
+      "type": "string",
+      "title": "POP API key",
+      "description": "Your POP Cloud API license key from popapi.io.",
+      "sensitive": true,
+      "required": true
+    },
+    "pop_environment": {
+      "type": "string",
+      "title": "POP environment",
+      "description": "Use production for live POP API calls or staging for test calls.",
+      "default": "production"
+    }
+  }
+}
+
