@@ -14,8 +14,20 @@ export const API_ENDPOINTS = {
   sdiDocumentGet: "/sdi-via-pop/document-get",
 } as const;
 
+export const ONBOARDING_BASE_URLS = {
+  production: "https://popapi.io/wp-json/api/onboarding/v1",
+  staging: "https://staging7.popapi.io/wp-json/api/onboarding/v1",
+} as const;
+
+export const ONBOARDING_ENDPOINTS = {
+  requestOtp:   "/request-otp",
+  verifyOtp:    "/verify-otp",
+  status:       "/status",
+  accountSetup: "/account-setup",
+} as const;
+
 export const CHARACTER_LIMIT = 25000;
 
 export const DEFAULT_TIMEOUT_MS = 30000;
 
-export const USER_AGENT = "pop-mcp-server/1.0.0";
+export const USER_AGENT = "pop-mcp/1.1.0";

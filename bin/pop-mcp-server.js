@@ -7,7 +7,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all3) => {
   for (var name in all3)
@@ -37516,9 +37520,19 @@ var API_ENDPOINTS = {
   sdiDocumentPreserve: "/sdi-via-pop/document-preserve",
   sdiDocumentGet: "/sdi-via-pop/document-get"
 };
+var ONBOARDING_BASE_URLS = {
+  production: "https://popapi.io/wp-json/api/onboarding/v1",
+  staging: "https://staging7.popapi.io/wp-json/api/onboarding/v1"
+};
+var ONBOARDING_ENDPOINTS = {
+  requestOtp: "/request-otp",
+  verifyOtp: "/verify-otp",
+  status: "/status",
+  accountSetup: "/account-setup"
+};
 var CHARACTER_LIMIT = 25e3;
 var DEFAULT_TIMEOUT_MS = 3e4;
-var USER_AGENT = "pop-mcp-server/1.0.0";
+var USER_AGENT = "pop-mcp/1.1.0";
 
 // references/pop-mcp/src/client.ts
 var apiClient = null;
@@ -37575,6 +37589,35 @@ function handleApiError(error2) {
   }
   const msg = error2 instanceof Error ? error2.message : String(error2);
   return `Unexpected error: ${msg}`;
+}
+function getOnboardingBaseUrl() {
+  return ONBOARDING_BASE_URLS[getEnvironment()];
+}
+async function apiOnboardingPost(endpoint, payload, token) {
+  const headers = {
+    "Content-Type": "application/json",
+    "User-Agent": USER_AGENT
+  };
+  if (token) headers["X-Onboarding-Token"] = token;
+  const response = await axios_default.post(
+    `${getOnboardingBaseUrl()}${endpoint}`,
+    payload,
+    { headers, timeout: DEFAULT_TIMEOUT_MS }
+  );
+  return response.data;
+}
+async function apiOnboardingGet(endpoint, token) {
+  const response = await axios_default.get(
+    `${getOnboardingBaseUrl()}${endpoint}`,
+    {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "X-Onboarding-Token": token
+      },
+      timeout: DEFAULT_TIMEOUT_MS
+    }
+  );
+  return response.data;
 }
 function getErrorHint(status, code) {
   if (code === "unauthorized_user") {
@@ -38364,14 +38407,449 @@ Args:
   );
 }
 
+// references/pop-mcp/src/tools/onboarding.ts
+var RequestOtpSchema = external_exports.object({
+  email: external_exports.string().email().describe("Email address to send the OTP to. If the account does not exist it will be created automatically."),
+  lang: external_exports.string().optional().describe("Locale hint (e.g. 'en', 'it'). Stored in the session context but does not affect response language.")
+});
+var VerifyOtpSchema = external_exports.object({
+  email: external_exports.string().email().describe("Must match the email used in pop_onboarding_request_otp"),
+  otp: external_exports.string().describe("6-digit OTP from the request-otp response (or the administrator password for admin accounts)"),
+  platform: external_exports.string().default("mcp").describe("Client identifier recorded in the session. Default: 'mcp'"),
+  site_id: external_exports.string().optional().describe("Optional caller site domain or identifier")
+});
+var OnboardingTokenSchema = external_exports.object({
+  onboarding_token: external_exports.string().describe("Token returned by pop_onboarding_verify_otp. Expires 30 minutes after issue.")
+});
+var ConfigurationsSchema = external_exports.object({
+  general_store_country: external_exports.string().optional().describe("ISO 3166-1 alpha-2 country code (e.g. IT, DE, BE). Determines wizard_variant and available integrations. Locked after first save."),
+  general_store_your_name: external_exports.string().optional().describe("Account holder first name"),
+  general_store_your_surname: external_exports.string().optional().describe("Account holder last name"),
+  general_store_company_name: external_exports.string().optional().describe("Legal company name"),
+  general_store_vat_number: external_exports.string().optional().describe("VAT number (format validated per country). Must be unique on the target environment \u2014 422 if already in use."),
+  general_store_tax_regime: external_exports.string().optional().describe("Tax regime code (e.g. RF01). Required for IT/SM accounts. Use lookup.tax_regimes from get_account_setup to find valid values."),
+  company_technical_email: external_exports.string().email().optional().describe("Technical/notifications email"),
+  company_accounting_email: external_exports.string().email().optional().describe("Accounting/billing email"),
+  general_store_phone: external_exports.string().optional().describe("Company phone number"),
+  general_store_email: external_exports.string().email().optional().describe("Company public email"),
+  use_national_id: external_exports.union([external_exports.literal(0), external_exports.literal(1)]).optional().describe("Set to 1 if general_store_vat_number contains a national tax ID instead of a VAT number. Not supported for IT, SM, GB, PL."),
+  active_sdipop_integration: external_exports.union([external_exports.literal(0), external_exports.literal(1)]).optional().describe("Set to 1 to activate SdI via POP. Only valid for IT/SM accounts. Mutually exclusive with active_peppol_integration."),
+  business_apply_signature: external_exports.union([external_exports.literal(0), external_exports.literal(1)]).optional().describe("Set to 1 to enable electronic signature with SdI"),
+  business_apply_legal_storage: external_exports.union([external_exports.literal(0), external_exports.literal(1)]).optional().describe("Set to 1 to enable certified long-term storage (conservazione sostitutiva) with SdI"),
+  active_peppol_integration: external_exports.union([external_exports.literal(0), external_exports.literal(1)]).optional().describe("Set to 1 to register a Peppol legal entity. Mutually exclusive with active_sdipop_integration. Requires peppol_* fields."),
+  peppol_identifier_scheme: external_exports.string().optional().describe("Required when active_peppol_integration=1. Use lookup.peppol.endpoint_scheme_options from get_account_setup for valid values."),
+  peppol_endpoint_identifier_value: external_exports.string().optional().describe("Required when active_peppol_integration=1. Format: '<scheme>:<value>' e.g. '9925:0123456789'"),
+  peppol_le_address: external_exports.string().optional().describe("Peppol legal entity street address. Required when active_peppol_integration=1."),
+  peppol_le_city: external_exports.string().optional().describe("Peppol legal entity city. Required when active_peppol_integration=1."),
+  peppol_le_zipcode: external_exports.string().optional().describe("Peppol legal entity zip/postal code. Required when active_peppol_integration=1.")
+});
+var SaveAccountSetupSchema = external_exports.object({
+  onboarding_token: external_exports.string().describe("Token returned by pop_onboarding_verify_otp. Expires 30 minutes after issue."),
+  environment: external_exports.enum(["live", "sandbox"]).default("live").describe("Which POP environment to configure. 'live' affects your production account; 'sandbox' is for testing."),
+  configurations: ConfigurationsSchema.describe("Account setup fields. Send only the fields you want to set. Locked fields (field_locks=true) cannot be changed.")
+});
+function formatRequestOtpResponse(data) {
+  const lines = ["# OTP Request Result", ""];
+  if (data.administrator_requires_password) {
+    lines.push("**Status:** Administrator account \u2014 no OTP issued");
+    lines.push("**Action required:** Use your administrator password as the `otp` field in `pop_onboarding_verify_otp`");
+  } else {
+    lines.push(`**Status:** ${data.state}`);
+    if (data.otp_code) {
+      lines.push("", `> **OTP Code: \`${data.otp_code}\`** \u2014 expires in 10 minutes`);
+      lines.push("", "_Copy this code and pass it to `pop_onboarding_verify_otp`._");
+    }
+    if (data.email_delivery_success) {
+      lines.push("", "An OTP was also sent to the email address.");
+    }
+  }
+  lines.push("", "---");
+  lines.push(`- **Email:** ${data.email}`);
+  lines.push(`- **Account:** ${data.existing_user ? "Existing user" : "New account created"}`);
+  if (data.lang) lines.push(`- **Language:** ${data.lang}`);
+  return lines.join("\n");
+}
+function formatVerifyOtpResponse(data) {
+  const lines = ["# Authentication Result", ""];
+  if (!data.authenticated) {
+    lines.push("**Authentication failed.**");
+    return lines.join("\n");
+  }
+  lines.push("**Authenticated successfully.**", "");
+  lines.push(`> **Onboarding Token: \`${data.onboarding_token}\`**`);
+  lines.push(`> Expires: ${data.token_expires_at}`);
+  lines.push("", "_Save this token \u2014 pass it to `pop_onboarding_get_status`, `pop_onboarding_get_account_setup`, and `pop_onboarding_save_account_setup`._");
+  lines.push("", "---");
+  lines.push(`- **State:** ${data.state}`);
+  lines.push(`- **Next action:** ${data.next_action}`);
+  lines.push(`- **Wizard required:** ${data.wizard_required}`);
+  lines.push(`- **Wizard variant:** ${data.wizard_variant || "basic (country not yet set)"}`);
+  lines.push(`- **Platform:** ${data.platform}`);
+  if (data.wizard_required && data.required_fields.length > 0) {
+    lines.push("", "**Required fields still missing:**");
+    for (const f of data.required_fields) lines.push(`  - \`${f}\``);
+    lines.push("", "_Call `pop_onboarding_get_account_setup` then `pop_onboarding_save_account_setup` to complete setup._");
+  } else if (!data.wizard_required) {
+    lines.push("", "Account setup is already complete. No further wizard steps needed.");
+  }
+  return lines.join("\n");
+}
+function formatStatusResponse(data) {
+  const lines = ["# Onboarding Status", ""];
+  lines.push(`- **State:** ${data.state}`);
+  lines.push(`- **Next action:** ${data.next_action}`);
+  lines.push(`- **Wizard required:** ${data.wizard_required}`);
+  lines.push(`- **Wizard completed:** ${data.wizard_completed}`);
+  lines.push(`- **Wizard variant:** ${data.wizard_variant || "basic"}`);
+  lines.push(`- **Country:** ${data.country || "(not set)"}`);
+  const required2 = data.required_fields;
+  if (required2 && required2.length > 0) {
+    lines.push("", "**Missing required fields:**");
+    for (const f of required2) lines.push(`  - \`${f}\``);
+  }
+  const stepVis = data.step_visibility;
+  if (stepVis) {
+    lines.push("", "**Step visibility:**");
+    for (const [step, visible] of Object.entries(stepVis)) {
+      lines.push(`  - ${step}: ${visible ? "visible" : "hidden"}`);
+    }
+  }
+  const integState = data.integration_state;
+  if (integState) {
+    const envs = integState.environments;
+    if (envs) {
+      lines.push("", "**Integration state:**");
+      for (const [env, integrations] of Object.entries(envs)) {
+        lines.push(`  - **${env}:**`);
+        for (const [name, state] of Object.entries(integrations)) {
+          lines.push(`    - ${name}: available=${state.available}, enabled=${state.enabled}, locked=${state.locked}`);
+        }
+      }
+    }
+  }
+  return lines.join("\n");
+}
+function formatAccountSetupResponse(data) {
+  const lines = ["# Account Setup", ""];
+  lines.push(`- **Wizard variant:** ${data.wizard_variant}`);
+  lines.push(`- **Wizard completed:** ${data.wizard_completed}`);
+  if (data.required_fields.length > 0) {
+    lines.push("", "**Fields still required:**");
+    for (const f of data.required_fields) lines.push(`  - \`${f}\``);
+  }
+  lines.push("", "## Current Configuration");
+  const configs = data.configurations;
+  const locks = data.field_locks ?? {};
+  for (const [key, value] of Object.entries(configs)) {
+    if (key.startsWith("peppol_") && value === null) continue;
+    const lock = locks[key] ? " \u{1F512}" : "";
+    lines.push(`- **${key}:** ${value === null || value === void 0 ? "_not set_" : value}${lock}`);
+  }
+  if (data.capabilities) {
+    const caps = data.capabilities;
+    lines.push("", "## Capabilities");
+    lines.push(`- Supports SdI onboarding: ${caps.supports_sdi_onboarding}`);
+    lines.push(`- Supports Peppol onboarding: ${caps.supports_peppol_onboarding}`);
+    lines.push(`- Supports tax regime selection: ${caps.supports_tax_regime_selection}`);
+  }
+  if (data.lookup) {
+    const lookup = data.lookup;
+    const countries = lookup.countries;
+    if (countries) {
+      lines.push("", "## Supported Countries");
+      for (const [code, name] of Object.entries(countries)) {
+        lines.push(`  - ${code}: ${name}`);
+      }
+    }
+    const taxRegimes = lookup.tax_regimes;
+    const country = configs.general_store_country;
+    if (taxRegimes && country && taxRegimes[country]) {
+      lines.push("", `## Tax Regimes for ${country}`);
+      for (const [code, desc] of Object.entries(taxRegimes[country])) {
+        lines.push(`  - ${code}: ${desc}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+function formatSaveAccountSetupResponse(data) {
+  const lines = ["# Account Setup Save Result", ""];
+  lines.push(`- **State:** ${data.state}`);
+  lines.push(`- **Next action:** ${data.next_action}`);
+  lines.push(`- **Saved:** ${data.saved}`);
+  lines.push(`- **Applied changes:** ${data.applied_changes}`);
+  if (data.applied_changes === false) {
+    lines.push("", "> Setup was already complete \u2014 no changes were written.");
+  }
+  const inner = data.data;
+  if (inner) {
+    lines.push(`- **Wizard completed:** ${inner.wizard_completed}`);
+    lines.push(`- **Wizard variant:** ${inner.wizard_variant}`);
+    const req = inner.required_fields;
+    if (req && req.length > 0) {
+      lines.push("", "**Still required:**");
+      for (const f of req) lines.push(`  - \`${f}\``);
+    }
+    const caps = inner.capabilities;
+    if (caps) {
+      lines.push("", "**Capabilities:**");
+      lines.push(`  - SdI onboarding: ${caps.supports_sdi_onboarding}`);
+      lines.push(`  - Peppol onboarding: ${caps.supports_peppol_onboarding}`);
+    }
+  }
+  const responses = data.responses;
+  if (responses) {
+    lines.push("", "## Integration Responses");
+    lines.push(`- **Environment:** ${responses.environment}`);
+    if (responses.businessRegistryResponse) {
+      lines.push("- **SdI business registry:** registered");
+      lines.push("```json");
+      lines.push(JSON.stringify(responses.businessRegistryResponse, null, 2));
+      lines.push("```");
+    }
+    if (responses.registerLegalEntityResponse) {
+      lines.push("- **Peppol legal entity:** registered");
+      lines.push("```json");
+      lines.push(JSON.stringify(responses.registerLegalEntityResponse, null, 2));
+      lines.push("```");
+    }
+  }
+  return lines.join("\n");
+}
+function registerOnboardingTools(server2) {
+  server2.registerTool(
+    "pop_onboarding_request_otp",
+    {
+      title: "Request Onboarding OTP",
+      description: `Start the POP onboarding flow by sending a one-time password (OTP) to an email address.
+
+This is step 1 of 5 in the onboarding sequence:
+  request-otp \u2192 verify-otp \u2192 get_status \u2192 get_account_setup \u2192 save_account_setup
+
+Key behaviours:
+- The OTP code is returned directly in the response (not just by email). Read otp_code from the response.
+- OTP expires in 10 minutes. Pass it to pop_onboarding_verify_otp immediately.
+- If the email does not exist, a new POP account is created automatically.
+- For administrator accounts, no OTP is issued. Use the admin password as the otp field in verify-otp instead.
+
+No API key required for this call.`,
+      inputSchema: RequestOtpSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      try {
+        const payload = { email: params.email };
+        if (params.lang) payload.lang = params.lang;
+        const result = await apiOnboardingPost(
+          ONBOARDING_ENDPOINTS.requestOtp,
+          payload
+        );
+        const text = formatRequestOtpResponse(result.data);
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return { isError: true, content: [{ type: "text", text: handleApiError(error2) }] };
+      }
+    }
+  );
+  server2.registerTool(
+    "pop_onboarding_verify_otp",
+    {
+      title: "Verify Onboarding OTP",
+      description: `Verify the OTP from pop_onboarding_request_otp and obtain an onboarding token.
+
+This is step 2 of 5 in the onboarding sequence.
+
+Key behaviours:
+- Returns an onboarding_token (48-character string). Save it \u2014 required for all subsequent steps.
+- Token expires 30 minutes after issue. No refresh endpoint; restart from request-otp if expired.
+- token_issued_at and token_expires_at are ISO 8601 strings (e.g. 2026-05-26T13:47:15+00:00).
+- wizard_variant is 'basic' if no country is saved yet \u2014 it updates after save_account_setup sets the country.
+- If wizard_required is false after this step, the account is already fully set up. No further steps needed.
+- For administrator accounts: pass the admin password as the otp field.
+
+No API key required for this call.`,
+      inputSchema: VerifyOtpSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      try {
+        const payload = {
+          email: params.email,
+          otp: params.otp,
+          platform: params.platform
+        };
+        if (params.site_id) payload.site_id = params.site_id;
+        const result = await apiOnboardingPost(
+          ONBOARDING_ENDPOINTS.verifyOtp,
+          payload
+        );
+        const text = formatVerifyOtpResponse(result.data);
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return { isError: true, content: [{ type: "text", text: handleApiError(error2) }] };
+      }
+    }
+  );
+  server2.registerTool(
+    "pop_onboarding_get_status",
+    {
+      title: "Get Onboarding Status",
+      description: `Retrieve the current onboarding state for the authenticated account.
+
+This is step 3 of 5 in the onboarding sequence (optional \u2014 use to poll state or check progress).
+
+Returns: state, next_action, wizard_variant, wizard_completed, required_fields, step_visibility, integration_state.
+
+Does NOT return configurations (field values). Use pop_onboarding_get_account_setup for those.
+
+Key behaviours:
+- auth_source will be 'onboarding_token' confirming the token was accepted.
+- step_visibility.integration = false means SdI/Peppol toggles do not apply to this account (basic variant).
+- integration_state.ksef.status = 'not_supported_in_onboarding_yet' is correct \u2014 not an error.`,
+      inputSchema: OnboardingTokenSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      try {
+        const result = await apiOnboardingGet(
+          ONBOARDING_ENDPOINTS.status,
+          params.onboarding_token
+        );
+        const text = formatStatusResponse(result.data);
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return { isError: true, content: [{ type: "text", text: handleApiError(error2) }] };
+      }
+    }
+  );
+  server2.registerTool(
+    "pop_onboarding_get_account_setup",
+    {
+      title: "Get Account Setup Configuration",
+      description: `Retrieve the full account setup payload: current field values, lookup tables, capabilities, and integration state.
+
+This is step 4 of 5 in the onboarding sequence. Call this before save_account_setup to understand:
+- Which fields are already saved (non-null in configurations)
+- Which fields are locked (field_locks = true) and cannot be changed
+- Which integrations are available for the account country (capabilities)
+- Valid tax regime codes (lookup.tax_regimes keyed by country)
+- Valid Peppol scheme options (lookup.peppol.endpoint_scheme_options)
+- Which integration toggles can be set (allowed_integration_toggles)
+
+Key behaviours:
+- Null values in configurations = field not yet saved, must be provided in save_account_setup.
+- Locked fields (\u{1F512}) must not be changed \u2014 the API will reject modifications.
+- Use capabilities.supports_sdi_onboarding and supports_peppol_onboarding to decide which integration to offer.
+- lookup.countries labels are in Italian regardless of the lang field.`,
+      inputSchema: OnboardingTokenSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      try {
+        const result = await apiOnboardingGet(
+          ONBOARDING_ENDPOINTS.accountSetup,
+          params.onboarding_token
+        );
+        const text = formatAccountSetupResponse(result.data);
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return { isError: true, content: [{ type: "text", text: handleApiError(error2) }] };
+      }
+    }
+  );
+  server2.registerTool(
+    "pop_onboarding_save_account_setup",
+    {
+      title: "Save Account Setup Configuration",
+      description: `Save the account setup configuration and optionally activate SdI or Peppol integration.
+
+This is step 5 of 5 in the onboarding sequence.
+
+Integration rules:
+- To activate SdI (Italy/San Marino): set active_sdipop_integration=1 and active_peppol_integration=0
+- To activate Peppol (EU countries): set active_peppol_integration=1 and active_sdipop_integration=0, and provide all peppol_* fields
+- SdI and Peppol are mutually exclusive \u2014 never set both to 1
+- For 'basic' variant accounts (non-IT, non-EU): do not send integration toggle fields
+
+Key behaviours:
+- general_store_vat_number must be unique on the target environment. 422 if already in use.
+- Sending 0 for an integration toggle means "do not activate" \u2014 the value stores as null in configurations.
+  Always read the effective activation state from integration_state.environments.*.sdi.enabled.
+- Once wizard is complete (wizard_completed=true), calling this again returns the current state without writing (applied_changes=false).
+- Once Peppol is registered (peppol_legal_entity_uuid set), all Peppol fields are locked permanently.
+- If SdI activation fails at ACube, the account data is still saved \u2014 retry is safe.`,
+      inputSchema: SaveAccountSetupSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      try {
+        const payload = {
+          environment: params.environment,
+          configurations: params.configurations
+        };
+        const result = await apiOnboardingPost(
+          ONBOARDING_ENDPOINTS.accountSetup,
+          payload,
+          params.onboarding_token
+        );
+        const text = formatSaveAccountSetupResponse(result.data);
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return { isError: true, content: [{ type: "text", text: handleApiError(error2) }] };
+      }
+    }
+  );
+}
+
 // references/pop-mcp/src/index.ts
 var server = new McpServer({
   name: "pop-mcp-server",
-  version: "1.0.0"
+  version: "1.1.0"
 });
 registerInvoiceTools(server);
 registerStatusTools(server);
 registerAdvancedTools(server);
+registerOnboardingTools(server);
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

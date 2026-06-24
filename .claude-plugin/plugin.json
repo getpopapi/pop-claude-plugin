@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "pop",
   "displayName": "POP",
-  "version": "1.0.0",
-  "description": "Create, validate, submit, retrieve, and preserve Italian SdI/FatturaPA, Peppol, and PDF invoices through the POP Cloud API.",
+  "version": "1.1.0",
+  "description": "Create, validate, submit, retrieve, and preserve Italian SdI/FatturaPA, Peppol, and PDF invoices through the POP Cloud API. Includes guided account onboarding.",
   "author": {
     "name": "POP"
   },
@@ -16,7 +16,8 @@
     "peppol",
     "italy",
     "pdf",
-    "mcp"
+    "mcp",
+    "onboarding"
   ],
   "mcpServers": "./.mcp.json",
   "userConfig": {
